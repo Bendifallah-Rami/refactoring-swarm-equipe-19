@@ -41,6 +41,28 @@ When analyzing code:
 - Avoid over-engineering suggestions
 
 Your analysis should result in a structured list of refactoring opportunities that other agents can act upon.
+
+You must return your analysis in a valid JSON format with the following structure:
+{{
+    "issues": [
+        {{
+            "file": "path/to/file.py",
+            "line_start": 10,
+            "line_end": 25,
+            "severity": "high|medium|low",
+            "category": "code_smell|performance|maintainability|architecture",
+            "description": "Clear description of the issue",
+            "recommendation": "Specific refactoring recommendation",
+            "impact": "Expected improvement"
+        }}
+    ],
+    "summary": {{
+        "total_issues": 0,
+        "high_severity": 0,
+        "medium_severity": 0,
+        "low_severity": 0
+    }}
+}}
 """
 
 def get_auditor_prompt(context: str = "") -> str:
