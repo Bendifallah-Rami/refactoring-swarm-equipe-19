@@ -1,11 +1,65 @@
-[
-  {
-    "id": "9e82e9b0-9b43-4a78-af43-d5d5ef848a2f",
-    "timestamp": "2025-12-26T01:26:41.177789",
-    "agent": "System",
-    "model": "unknown",
-    "action": "STARTUP",
-    "details": "Target: ./sandbox",
-    "status": "INFO"
-  }
-]
+{
+  "experiments": [
+    {
+      "id": "9fbf7280-33e8-4fd8-b68d-bc8ed8f3d8dc",
+      "timestamp": "2026-01-08T07:44:05.079014",
+      "agent_name": "Auditor_Agent",
+      "model_used": "gemini-2.0-flash",
+      "action": "ANALYSIS",
+      "details": {
+        "input_prompt": "Analyse ce code Python",
+        "output_response": "J'ai trouve 3 problemes",
+        "file_analyzed": "example.py"
+      },
+      "status": "SUCCESS"
+    },
+    {
+      "id": "cd9348b7-2f8e-466e-bf02-7cfc305f4403",
+      "timestamp": "2026-01-08T07:44:05.096522",
+      "agent_name": "Test_Agent",
+      "model_used": "gemini-2.0-flash",
+      "action": "ANALYSIS",
+      "details": {
+        "input_prompt": "Test de ANALYSIS",
+        "output_response": "Reponse pour ANALYSIS"
+      },
+      "status": "SUCCESS"
+    },
+    {
+      "id": "df6c1f3c-41be-45ec-80aa-aee04156d2ce",
+      "timestamp": "2026-01-08T07:44:05.116035",
+      "agent_name": "Test_Agent",
+      "model_used": "gemini-2.0-flash",
+      "action": "GENERATION",
+      "details": {
+        "input_prompt": "Test de GENERATION",
+        "output_response": "Reponse pour GENERATION"
+      },
+      "status": "SUCCESS"
+    },
+    {
+      "id": "284e7eb9-3150-451e-8708-2d8b9ed367cb",
+      "timestamp": "2026-01-08T07:44:05.126889",
+      "agent_name": "Test_Agent",
+      "model_used": "gemini-2.0-flash",
+      "action": "DEBUG",
+      "details": {
+        "input_prompt": "Test de DEBUG",
+        "output_response": "Reponse pour DEBUG"
+      },
+      "status": "SUCCESS"
+    },
+    {
+      "id": "6abf5c59-b1d5-46eb-b913-ee0074098de0",
+      "timestamp": "2026-01-08T07:44:05.142566",
+      "agent_name": "Test_Agent",
+      "model_used": "gemini-2.0-flash",
+      "action": "FIX",
+      "details": {
+        "input_prompt": "Test de FIX",
+        "output_response": "Reponse pour FIX"
+      },
+      "status": "SUCCESS"
+    }
+  ]
+}
