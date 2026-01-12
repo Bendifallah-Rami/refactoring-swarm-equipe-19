@@ -15,3 +15,4 @@ sandbox/
 logs/*
 # ...SAUF le fichier de données final qu'on veut récupérer
 !logs/experiment_data.json
+plan.md
