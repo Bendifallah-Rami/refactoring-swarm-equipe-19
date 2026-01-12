@@ -2,6 +2,7 @@
 Orchestrator - Coordinates the multi-agent refactoring workflow using LangChain.
 
 Day 6 Task 1: Execution graph - connects Auditor → Fixer → Judge workflow
+Day 6 Task 2: Self-healing loop - iterates until approved or max iterations reached
 """
 
 import os
@@ -10,11 +11,14 @@ from typing import Dict, List, Any, Optional
 from src.agent_registry import get_registry
 from src.utils.logger import log_experiment, ActionType
 
+# Maximum iterations for self-healing loop
+MAX_ITERATIONS = 10
+
 
 class WorkflowState:
     """
     Maintains state as it flows through the agent workflow.
-    Passes data between Auditor → Fixer → Judge.
+    Passes data between Auditor → Fixer → Judge with iteration tracking.
     """
     
     def __init__(self, file_path: str):
@@ -24,6 +28,8 @@ class WorkflowState:
         self.audit_result: Optional[Dict] = None
         self.fix_result: Optional[Dict] = None
         self.judgment: Optional[Dict] = None
+        self.iteration: int = 0  # Track current iteration
+        self.completed: bool = False  # Track if processing is complete
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert state to dictionary for logging."""
@@ -31,14 +37,17 @@ class WorkflowState:
             "file_path": self.file_path,
             "has_audit": self.audit_result is not None,
             "has_fixes": self.fix_result is not None,
-            "has_judgment": self.judgment is not None
+            "has_judgment": self.judgment is not None,
+            "iteration": self.iteration,
+            "completed": self.completed
         }
 
 
 class RefactoringOrchestrator:
     """
     Orchestrator that executes the workflow graph: Auditor → Fixer → Judge
-    Uses LangChain agents connected in sequence.
+    Uses LangChain agents connected in sequence with self-healing loop.
+    Iterates up to MAX_ITERATIONS until Judge approves or gives up.
     """
     
     def __init__(self, target_dir: str):
@@ -100,7 +109,8 @@ class RefactoringOrchestrator:
     
     def _execute_workflow(self, file_path: str) -> WorkflowState:
         """
-        Execute workflow graph: Auditor → Fixer → Judge
+        Execute workflow graph with self-healing loop: Auditor → Fixer → Judge
+        Repeats until Judge approves or MAX_ITERATIONS reached.
         
         Args:
             file_path: Path to file to process
@@ -119,35 +129,57 @@ class RefactoringOrchestrator:
         fixer = self.registry.get_fixer()
         judge = self.registry.get_judge()
         
-        print(f"📊 Executing workflow graph...")
+        print(f"🔄 Starting self-healing loop (max {MAX_ITERATIONS} iterations)...")
         
-        # Node 1: Auditor analyzes code
-        print("  1️⃣ Auditor analyzing...")
-        state.audit_result = self._run_auditor(auditor, file_path)
-        
-        if not state.audit_result or not state.audit_result.get("issues"):
-            print("  ✅ No issues found!")
-        else:
+        # Self-healing loop
+        while state.iteration < MAX_ITERATIONS and not state.completed:
+            state.iteration += 1
+            print(f"\n  🔁 Iteration {state.iteration}/{MAX_ITERATIONS}")
+            
+            # Node 1: Auditor analyzes code
+            print("    1️⃣ Auditor analyzing...")
+            state.audit_result = self._run_auditor(auditor, file_path)
+            
+            if not state.audit_result or not state.audit_result.get("issues"):
+                print("    ✅ No issues found!")
+                state.completed = True
+                break
+            
             issues_count = len(state.audit_result.get("issues", []))
-            print(f"  🔍 Found {issues_count} issue(s)")
+            print(f"    🔍 Found {issues_count} issue(s)")
             
             # Node 2: Fixer generates fixes
-            print("  2️⃣ Fixer generating fixes...")
+            print("    2️⃣ Fixer generating fixes...")
             state.fix_result = self._run_fixer(fixer, file_path, state.audit_result)
             
-            if state.fix_result and state.fix_result.get("fixes"):
-                fixes_count = len(state.fix_result.get("fixes", []))
-                print(f"  🔧 Generated {fixes_count} fix(es)")
-                
-                # Node 3: Judge validates fixes
-                print("  3️⃣ Judge evaluating...")
-                state.judgment = self._run_judge(judge, file_path, state.audit_result, state.fix_result)
-                
-                verdict = state.judgment.get("verdict", "UNKNOWN")
-                score = state.judgment.get("overall_score", 0)
-                print(f"  📊 Verdict: {verdict} (Score: {score}/100)")
-            else:
-                print("  ⚠️  Fixer couldn't generate fixes")
+            if not state.fix_result or not state.fix_result.get("fixes"):
+                print("    ⚠️  Fixer couldn't generate fixes - stopping")
+                break
+            
+            fixes_count = len(state.fix_result.get("fixes", []))
+            print(f"    🔧 Generated {fixes_count} fix(es)")
+            
+            # Node 3: Judge validates fixes
+            print("    3️⃣ Judge evaluating...")
+            state.judgment = self._run_judge(judge, file_path, state.audit_result, state.fix_result)
+            
+            verdict = state.judgment.get("verdict", "UNKNOWN")
+            score = state.judgment.get("overall_score", 0)
+            print(f"    📊 Verdict: {verdict} (Score: {score}/100)")
+            
+            # Check if approved - exit loop
+            if verdict == "APPROVED":
+                print(f"    ✅ APPROVED - Stopping at iteration {state.iteration}")
+                state.completed = True
+                break
+            elif verdict == "REJECTED":
+                print(f"    ❌ REJECTED - Stopping at iteration {state.iteration}")
+                break
+            else:  # NEEDS_REVISION
+                if state.iteration < MAX_ITERATIONS:
+                    print(f"    🔄 NEEDS_REVISION - Continuing to iteration {state.iteration + 1}")
+                else:
+                    print(f"    ⏱️  Max iterations reached - Stopping")
         
         # Save result
         self.results[file_path] = state
@@ -158,8 +190,8 @@ class RefactoringOrchestrator:
             model_used="N/A",
             action=ActionType.ANALYSIS,
             details={
-                "input_prompt": f"Workflow graph execution on: {file_path}",
-                "output_response": f"Auditor → Fixer → Judge completed"
+                "input_prompt": f"Self-healing workflow on: {file_path}",
+                "output_response": f"Completed in {state.iteration} iteration(s), completed={state.completed}"
             }
         )
         
