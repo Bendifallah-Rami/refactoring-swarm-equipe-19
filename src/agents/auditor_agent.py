@@ -72,7 +72,7 @@ class AuditorAgent(BaseAgent):
     Agent responsible for auditing codebases and identifying refactoring opportunities using LangChain.
     """
     
-    def __init__(self, model_name: str = "gemini-2.0-flash-exp"):
+    def __init__(self, model_name: str = "gemini-2.5-flash"):
         """
         Initialize the Auditor Agent with LangChain components.
         

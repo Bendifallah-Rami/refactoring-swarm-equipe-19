@@ -1,12 +1,12 @@
 import os
-import google.generativeai as genai
 from abc import ABC, abstractmethod
+from langchain_google_genai import ChatGoogleGenerativeAI
 from src.utils.logger import log_experiment, ActionType
 
 class BaseAgent(ABC):
     """Abstract base class for all agents in the Refactoring Swarm."""
     
-    def __init__(self, agent_name: str, model_name: str = "gemini-2.0-flash"):
+    def __init__(self, agent_name: str, model_name: str = "gemini-2.5-flash"):
         """
         Initialize the base agent.
         
@@ -17,13 +17,17 @@ class BaseAgent(ABC):
         self.agent_name = agent_name
         self.model_name = model_name
         
-        # Configure Gemini API
+        # Configure LangChain LLM
         api_key = os.getenv("GOOGLE_API_KEY")
         if not api_key:
             raise ValueError("GOOGLE_API_KEY not found in environment variables")
         
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel(model_name)
+        self.model = ChatGoogleGenerativeAI(
+            model=model_name,
+            google_api_key=api_key,
+            temperature=0.2,
+            convert_system_message_to_human=True
+        )
     
     def call_llm(self, prompt: str, action_type: ActionType, extra_details: dict = None) -> str:
         """
@@ -38,9 +42,9 @@ class BaseAgent(ABC):
             LLM response text
         """
         try:
-            # Call Gemini
-            response = self.model.generate_content(prompt)
-            response_text = response.text
+            # Call LLM through LangChain
+            response = self.model.invoke(prompt)
+            response_text = response.content
             
             # Prepare log details
             details = {

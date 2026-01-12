@@ -90,7 +90,7 @@ class JudgeAgent(BaseAgent):
     Agent responsible for evaluating and validating refactoring work using LangChain.
     """
     
-    def __init__(self, model_name: str = "gemini-2.0-flash-exp"):
+    def __init__(self, model_name: str = "gemini-2.5-flash"):
         """
         Initialize the Judge Agent with LangChain components.
         
