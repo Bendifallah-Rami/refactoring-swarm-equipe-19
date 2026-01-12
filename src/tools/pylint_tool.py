@@ -7,7 +7,8 @@ import json
 import re
 from typing import Dict, List, Optional
 from src.utils.logger import log_experiment, ActionType
-from src.tools.file_tools import is_safe_path, list_files
+from src.tools.file_tools import list_files
+from src.tools.sandbox_manager import is_path_in_sandbox
 
 
 def run_pylint_analysis(file_path: str, sandbox_dir: str = "./sandbox") -> Dict:
@@ -32,114 +33,72 @@ def run_pylint_analysis(file_path: str, sandbox_dir: str = "./sandbox") -> Dict:
     Raises:
         SecurityError: If path is outside sandbox
     """
-    is_safe_path(file_path, sandbox_dir)
+    is_path_in_sandbox(file_path, sandbox_dir)
 
+    # Run pylint with JSON output for issues
+    result_json = subprocess.run(
+        ['pylint', '--output-format=json', file_path],
+        capture_output=True,
+        text=True,
+        timeout=30
+    )
+
+    # Parse JSON output
     try:
-        # Run pylint with JSON output for issues
-        result_json = subprocess.run(
-            ['pylint', '--output-format=json', file_path],
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
+        issues = json.loads(result_json.stdout)
+    except json.JSONDecodeError:
+        issues = []
 
-        # Parse JSON output
-        try:
-            issues = json.loads(result_json.stdout)
-        except json.JSONDecodeError:
-            issues = []
+    # Run pylint again with text output to get score
+    result_text = subprocess.run(
+        ['pylint', file_path],
+        capture_output=True,
+        text=True,
+        timeout=30
+    )
 
-        # Run pylint again with text output to get score
-        result_text = subprocess.run(
-            ['pylint', file_path],
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
+    # Extract score from text output
+    score = extract_pylint_score(result_text.stdout + result_text.stderr)
 
-        # Extract score from text output
-        score = extract_pylint_score(result_text.stdout + result_text.stderr)
+    # Categorize issues
+    errors = [i for i in issues if i.get('type') == 'error']
+    warnings = [i for i in issues if i.get('type') == 'warning']
 
-        # Categorize issues
-        errors = [i for i in issues if i.get('type') == 'error']
-        warnings = [i for i in issues if i.get('type') == 'warning']
+    analysis_result = {
+        "file": file_path,
+        "score": score,
+        "total_issues": len(issues),
+        "errors": len(errors),
+        "warnings": len(warnings),
+        "issues": issues[:20],  # Limit to first 20 issues
+        "issues_detail": [
+            {
+                "line": i.get('line'),
+                "column": i.get('column'),
+                "type": i.get('type'),
+                "symbol": i.get('symbol'),
+                "message": i.get('message')
+            }
+            for i in issues[:10]
+        ]
+    }
 
-        analysis_result = {
-            "file": file_path,
+    log_experiment(
+        agent_name="Toolsmith",
+        model_used="pylint",
+        action=ActionType.ANALYSIS,
+        details={
+            "operation": "pylint_analysis",
+            "file_path": file_path,
+            "input_prompt": f"Analyze code quality: {file_path}",
+            "output_response": json.dumps(analysis_result),
             "score": score,
-            "total_issues": len(issues),
-            "errors": len(errors),
-            "warnings": len(warnings),
-            "issues": issues[:20],  # Limit to first 20 issues
-            "issues_detail": [
-                {
-                    "line": i.get('line'),
-                    "column": i.get('column'),
-                    "type": i.get('type'),
-                    "symbol": i.get('symbol'),
-                    "message": i.get('message')
-                }
-                for i in issues[:10]
-            ]
-        }
+            "total_issues": len(issues)
+        },
+        status="SUCCESS"
+    )
 
-        log_experiment(
-            agent_name="Toolsmith",
-            model_used="pylint",
-            action=ActionType.ANALYSIS,
-            details={
-                "operation": "pylint_analysis",
-                "file_path": file_path,
-                "input_prompt": f"Analyze code quality: {file_path}",
-                "output_response": json.dumps(analysis_result),
-                "score": score,
-                "total_issues": len(issues)
-            },
-            status="SUCCESS"
-        )
-
-        return analysis_result
-
-    except subprocess.TimeoutExpired:
-        log_experiment(
-            agent_name="Toolsmith",
-            model_used="pylint",
-            action=ActionType.DEBUG,
-            details={
-                "operation": "pylint_analysis",
-                "file_path": file_path,
-                "input_prompt": f"Analyze code quality: {file_path}",
-                "output_response": "Pylint analysis timed out",
-                "error": "timeout"
-            },
-            status="FAILURE"
-        )
-        return {
-            "file": file_path,
-            "score": 0,
-            "error": "Analysis timeout",
-            "issues": []
-        }
-    except Exception as e:
-        log_experiment(
-            agent_name="Toolsmith",
-            model_used="pylint",
-            action=ActionType.DEBUG,
-            details={
-                "operation": "pylint_analysis",
-                "file_path": file_path,
-                "input_prompt": f"Analyze code quality: {file_path}",
-                "output_response": f"Error: {str(e)}",
-                "error": str(e)
-            },
-            status="FAILURE"
-        )
-        return {
-            "file": file_path,
-            "score": 0,
-            "error": str(e),
-            "issues": []
-        }
+    return analysis_result
 
 
 def extract_pylint_score(output: str) -> float:
@@ -194,7 +153,7 @@ def get_directory_quality_score(directory: str, sandbox_dir: str = "./sandbox") 
             "files": [...]
         }
     """
-    is_safe_path(directory, sandbox_dir)
+    is_path_in_sandbox(directory, sandbox_dir)
 
     files = list_files(directory, sandbox_dir)
 
