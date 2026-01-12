@@ -258,7 +258,45 @@ def get_experiment_stats() -> dict:
     
     return stats
 
-
+def log_iteration(
+    iteration_number: int,
+    phase: str,
+    result: dict,
+    status: str = "SUCCESS"
+) -> str:
+    """
+    Log a complete iteration of the refactoring loop.
+    
+    Args:
+        iteration_number: Current iteration (1-10)
+        phase: "audit", "fix", or "judge"
+        result: Result dictionary from that phase
+        status: "SUCCESS" or "FAILURE"
+    
+    Returns:
+        Unique log ID
+    
+    Example:
+        >>> log_iteration(
+        ...     iteration_number=1,
+        ...     phase="audit",
+        ...     result={"issues_found": 5},
+        ...     status="SUCCESS"
+        ... )
+        'uuid-1234-...'
+    """
+    return log_experiment(
+        agent_name=f"Orchestrator_Iteration_{iteration_number}",
+        model_used="system",
+        action=ActionType.DEBUG,
+        details={
+            "input_prompt": f"Starting {phase} phase",
+            "output_response": json.dumps(result, indent=2),
+            "iteration": iteration_number,
+            "phase": phase
+        },
+        status=status
+    )
 
 if __name__ == "__main__":
     # Test rapide
