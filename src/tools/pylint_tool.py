@@ -5,7 +5,8 @@ Static code analysis and quality scoring
 import subprocess
 import json
 import re
-from typing import Dict, List, Optional
+from typing import Dict
+
 from src.utils.logger import log_experiment, ActionType
 from src.tools.file_tools import list_files
 from src.tools.sandbox_manager import is_path_in_sandbox
@@ -14,144 +15,131 @@ from src.tools.sandbox_manager import is_path_in_sandbox
 def run_pylint_analysis(file_path: str, sandbox_dir: str = "./sandbox") -> Dict:
     """
     Run pylint analysis on a Python file.
-    
-    Args:
-        file_path: Path to Python file
-        sandbox_dir: Sandbox root directory
-        
-    Returns:
-        Dictionary with analysis results:
-        {
-            "file": "path/to/file.py",
-            "score": 8.5,
-            "issues": [...],
-            "warnings": [...],
-            "errors": [...],
-            "statement_count": int
-        }
-        
-    Raises:
-        SecurityError: If path is outside sandbox
     """
     is_path_in_sandbox(file_path, sandbox_dir)
 
-    # Run pylint with JSON output for issues
-    result_json = subprocess.run(
-        ['pylint', '--output-format=json', file_path],
-        capture_output=True,
-        text=True,
-        timeout=30
-    )
-
-    # Parse JSON output
     try:
-        issues = json.loads(result_json.stdout)
-    except json.JSONDecodeError:
-        issues = []
+        # Run pylint with JSON output
+        result_json = subprocess.run(
+            ["pylint", "--output-format=json", file_path],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
 
-    # Run pylint again with text output to get score
-    result_text = subprocess.run(
-        ['pylint', file_path],
-        capture_output=True,
-        text=True,
-        timeout=30
-    )
+        try:
+            issues = json.loads(result_json.stdout)
+        except json.JSONDecodeError:
+            issues = []
 
-    # Extract score from text output
-    score = extract_pylint_score(result_text.stdout + result_text.stderr)
+        # Run pylint again to extract score
+        result_text = subprocess.run(
+            ["pylint", file_path],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
 
-    # Categorize issues
-    errors = [i for i in issues if i.get('type') == 'error']
-    warnings = [i for i in issues if i.get('type') == 'warning']
+        score = extract_pylint_score(result_text.stdout + result_text.stderr)
 
-    analysis_result = {
-        "file": file_path,
-        "score": score,
-        "total_issues": len(issues),
-        "errors": len(errors),
-        "warnings": len(warnings),
-        "issues": issues[:20],  # Limit to first 20 issues
-        "issues_detail": [
-            {
-                "line": i.get('line'),
-                "column": i.get('column'),
-                "type": i.get('type'),
-                "symbol": i.get('symbol'),
-                "message": i.get('message')
-            }
-            for i in issues[:10]
-        ]
-    }
+        errors = [i for i in issues if i.get("type") == "error"]
+        warnings = [i for i in issues if i.get("type") == "warning"]
 
-    log_experiment(
-        agent_name="Toolsmith",
-        model_used="pylint",
-        action=ActionType.ANALYSIS,
-        details={
-            "operation": "pylint_analysis",
-            "file_path": file_path,
-            "input_prompt": f"Analyze code quality: {file_path}",
-            "output_response": json.dumps(analysis_result),
+        analysis_result = {
+            "file": file_path,
             "score": score,
-            "total_issues": len(issues)
-        },
-        status="SUCCESS"
-    )
+            "total_issues": len(issues),
+            "errors": len(errors),
+            "warnings": len(warnings),
+            "issues": issues[:20],
+            "issues_detail": [
+                {
+                    "line": i.get("line"),
+                    "column": i.get("column"),
+                    "type": i.get("type"),
+                    "symbol": i.get("symbol"),
+                    "message": i.get("message")
+                }
+                for i in issues[:10]
+            ]
+        }
 
-    return analysis_result
+        log_experiment(
+            agent_name="Toolsmith",
+            model_used="pylint",
+            action=ActionType.ANALYSIS,
+            details={
+                "operation": "pylint_analysis",
+                "file_path": file_path,
+                "input_prompt": f"Analyze code quality: {file_path}",
+                "output_response": json.dumps(analysis_result),
+                "score": score,
+                "total_issues": len(issues)
+            },
+            status="SUCCESS"
+        )
+
+        return analysis_result
+
+    except subprocess.TimeoutExpired:
+        log_experiment(
+            agent_name="Toolsmith",
+            model_used="pylint",
+            action=ActionType.DEBUG,
+            details={
+                "operation": "pylint_analysis",
+                "file_path": file_path,
+                "input_prompt": f"Analyze code quality: {file_path}",
+                "output_response": "Pylint analysis timed out",
+                "error": "timeout"
+            },
+            status="FAILURE"
+        )
+        return {
+            "file": file_path,
+            "score": 0,
+            "error": "Analysis timeout",
+            "issues": []
+        }
+
+    except Exception as e:
+        log_experiment(
+            agent_name="Toolsmith",
+            model_used="pylint",
+            action=ActionType.DEBUG,
+            details={
+                "operation": "pylint_analysis",
+                "file_path": file_path,
+                "input_prompt": f"Analyze code quality: {file_path}",
+                "output_response": f"Error: {str(e)}",
+                "error": str(e)
+            },
+            status="FAILURE"
+        )
+        return {
+            "file": file_path,
+            "score": 0,
+            "error": str(e),
+            "issues": []
+        }
 
 
 def extract_pylint_score(output: str) -> float:
     """
-    Extract pylint score from output.
-    
-    Pylint calcule le score comme suit:
-    - Score de base = 10.0
-    - Chaque erreur/warning/convention retire des points
-    - Formule: 10.0 - (10.0 * nombre_issues / nombre_statements)
-    - Le score est arrondi à 2 décimales
-    
-    Exemples:
-    - 0 issues → 10.00/10
-    - Beaucoup d'issues → peut descendre à 0.00/10 (voire négatif mais limité à 0)
-    
-    Args:
-        output: Pylint output text
-        
-    Returns:
-        Score between 0 and 10
+    Extract pylint score from output text.
     """
-    # Look for pattern like "rated at 8.50/10" or "rated at 0.00/10"
-    match = re.search(r'rated at ([-\d.]+)/10', output)
+    match = re.search(r"rated at ([-\d.]+)/10", output)
     if match:
         try:
-            score = float(match.group(1))
-            # Pylint peut donner des scores négatifs, on les limite à 0
-            return max(0.0, score)
+            return max(0.0, float(match.group(1)))
         except ValueError:
             pass
-
-    # Default score if not found (should rarely happen)
     return 0.0
 
 
 def get_directory_quality_score(directory: str, sandbox_dir: str = "./sandbox") -> Dict:
     """
-    Analyze all Python files in a directory and get overall quality score.
-    
-    Args:
-        directory: Directory to analyze
-        sandbox_dir: Sandbox root directory
-        
-    Returns:
-        Dictionary with directory analysis:
-        {
-            "directory": "path",
-            "average_score": 7.5,
-            "file_count": 3,
-            "total_issues": 15,
-            "files": [...]
-        }
+    Analyze all Python files in a directory.
     """
     is_path_in_sandbox(directory, sandbox_dir)
 
@@ -166,21 +154,23 @@ def get_directory_quality_score(directory: str, sandbox_dir: str = "./sandbox") 
             "files": []
         }
 
-    file_analyses = []
     total_score = 0
     total_issues = 0
+    file_analyses = []
 
     for file_path in files:
         analysis = run_pylint_analysis(file_path, sandbox_dir)
+
         file_analyses.append({
             "file": file_path,
             "score": analysis.get("score", 0),
             "issues": analysis.get("total_issues", 0)
         })
+
         total_score += analysis.get("score", 0)
         total_issues += analysis.get("total_issues", 0)
 
-    average_score = total_score / len(files) if files else 0
+    average_score = total_score / len(files)
 
     result = {
         "directory": directory,
@@ -211,22 +201,13 @@ def get_directory_quality_score(directory: str, sandbox_dir: str = "./sandbox") 
 def get_code_issues_summary(file_path: str, sandbox_dir: str = "./sandbox") -> Dict:
     """
     Get a summary of code issues organized by type.
-    
-    Args:
-        file_path: Path to Python file
-        sandbox_dir: Sandbox root directory
-        
-    Returns:
-        Dictionary with organized issues
     """
     analysis = run_pylint_analysis(file_path, sandbox_dir)
 
     issues_by_type = {}
     for issue in analysis.get("issues", []):
-        issue_type = issue.get('type', 'unknown')
-        if issue_type not in issues_by_type:
-            issues_by_type[issue_type] = []
-        issues_by_type[issue_type].append(issue)
+        issue_type = issue.get("type", "unknown")
+        issues_by_type.setdefault(issue_type, []).append(issue)
 
     return {
         "file": file_path,

@@ -25,10 +25,12 @@ def is_path_in_sandbox(path: str, sandbox_dir: str = "./sandbox") -> bool:
     Raises:
         SecurityError: If path is outside sandbox
     """
-    abs_path = os.path.abspath(path)
-    abs_sandbox = os.path.abspath(sandbox_dir)
+    # Resolve symlinks and normalize paths to prevent bypass attempts
+    abs_path = os.path.normpath(os.path.abspath(os.path.realpath(path)))
+    abs_sandbox = os.path.normpath(os.path.abspath(os.path.realpath(sandbox_dir)))
     
-    if not abs_path.startswith(abs_sandbox):
+    # Add separator to prevent false positives (e.g., /sandbox vs /sandbox_evil)
+    if not (abs_path.startswith(abs_sandbox + os.sep) or abs_path == abs_sandbox):
         raise SecurityError(
             f"❌ SECURITY VIOLATION: Path '{path}' is outside sandbox! "
             f"Only paths within '{abs_sandbox}' are allowed."

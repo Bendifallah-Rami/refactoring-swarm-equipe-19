@@ -7,7 +7,7 @@ import json
 from typing import Dict
 
 from src.utils.logger import log_experiment, ActionType
-from src.utils.sandbox_manager import is_path_sandbox
+from src.tools.sandbox_manager import is_path_in_sandbox
 from src.tools.file_tools import read_file, write_file
 
 
@@ -22,7 +22,7 @@ def apply_fix(file_path: str, fixed_code: str, sandbox_dir: str = "./sandbox") -
     """
     Apply a code fix to a file.
     """
-    is_path_sandbox(file_path, sandbox_dir)
+    is_path_in_sandbox(file_path, sandbox_dir)
 
     validate_python_syntax(fixed_code)
 
@@ -54,7 +54,7 @@ def add_docstring(file_path: str, sandbox_dir: str = "./sandbox") -> Dict:
     """
     Analyze missing docstrings.
     """
-    is_path_sandbox(file_path, sandbox_dir)
+    is_path_in_sandbox(file_path, sandbox_dir)
 
     content = read_file(file_path, sandbox_dir)
     tree = ast.parse(content)
@@ -88,7 +88,7 @@ def get_code_metrics(file_path: str, sandbox_dir: str = "./sandbox") -> Dict:
     """
     Compute basic code metrics.
     """
-    is_path_sandbox(file_path, sandbox_dir)
+    is_path_in_sandbox(file_path, sandbox_dir)
 
     content = read_file(file_path, sandbox_dir)
     tree = ast.parse(content)
@@ -127,8 +127,8 @@ def compare_files(file_path1: str, file_path2: str, sandbox_dir: str = "./sandbo
     """
     Compare two Python files.
     """
-    is_path_sandbox(file_path1, sandbox_dir)
-    is_path_sandbox(file_path2, sandbox_dir)
+    is_path_in_sandbox(file_path1, sandbox_dir)
+    is_path_in_sandbox(file_path2, sandbox_dir)
 
     content1 = read_file(file_path1, sandbox_dir)
     content2 = read_file(file_path2, sandbox_dir)

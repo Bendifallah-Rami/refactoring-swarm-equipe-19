@@ -1,8 +1,8 @@
 """File Tools for Toolsmith.
 Minimal API expected by the TP:
-- `read_file`, `write_file`, `list_files`
+- read_file, write_file, list_files
 - strict sandbox path restriction
-- logging via `log_experiment`
+- logging via log_experiment
 """
 
 import os
@@ -74,24 +74,40 @@ def write_file(file_path: str, content: str, sandbox_dir: str = "./sandbox") -> 
     if parent_dir:
         os.makedirs(parent_dir, exist_ok=True)
 
-    with open(file_path, 'w', encoding='utf-8') as f:
-        f.write(content)
+    try:
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(content)
 
-    log_experiment(
-        agent_name="Toolsmith",
-        model_used="file_tools",
-        action=ActionType.FIX,
-        details={
-            "operation": "write_file",
-            "file_path": file_path,
-            "input_prompt": f"Write file: {file_path}",
-            "output_response": f"Successfully wrote {len(content)} characters",
-            "bytes_written": len(content)
-        },
-        status="SUCCESS"
-    )
+        log_experiment(
+            agent_name="Toolsmith",
+            model_used="file_tools",
+            action=ActionType.FIX,
+            details={
+                "operation": "write_file",
+                "file_path": file_path,
+                "input_prompt": f"Write file: {file_path}",
+                "output_response": f"Successfully wrote {len(content)} characters",
+                "bytes_written": len(content)
+            },
+            status="SUCCESS"
+        )
 
-    return True
+        return True
+    except Exception as e:
+        log_experiment(
+            agent_name="Toolsmith",
+            model_used="file_tools",
+            action=ActionType.DEBUG,
+            details={
+                "operation": "write_file",
+                "file_path": file_path,
+                "input_prompt": f"Write file: {file_path}",
+                "output_response": f"Error: {str(e)}",
+                "error": str(e)
+            },
+            status="FAILURE"
+        )
+        raise
 
 
 def list_files(directory: str, sandbox_dir: str = "./sandbox") -> List[str]:
