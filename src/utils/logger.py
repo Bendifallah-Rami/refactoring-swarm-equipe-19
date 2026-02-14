@@ -34,6 +34,7 @@ class ActionType(str, Enum):
     GENERATION = "GENERATION"  # Création de nouveau code/tests/docs
     DEBUG = "DEBUG"            # Analyse d'erreurs d'exécution
     FIX = "FIX"                # Application de correctifs
+    JUDGE = "JUDGE"            # Évaluation/validation des correctifs
 
 
 def _ensure_log_file():

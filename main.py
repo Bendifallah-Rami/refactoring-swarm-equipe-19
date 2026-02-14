@@ -3,6 +3,7 @@ import sys
 import os
 from dotenv import load_dotenv
 from src.utils.logger import log_experiment, ActionType  # Import ActionType
+from src.orchestrator import RefactoringOrchestrator
 
 load_dotenv()
 
@@ -28,7 +29,14 @@ def main():
         }
     )
 
+    orchestrator = RefactoringOrchestrator(args.target_dir)
+    summary = orchestrator.run()
+
     print("✅ MISSION_COMPLETE")
+    print(
+        f"📌 Résumé: processed={summary['files_processed']} | "
+        f"success={summary['successful']} | failed={summary['failed']}"
+    )
 
 if __name__ == "__main__":
     main()

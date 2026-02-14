@@ -199,6 +199,7 @@ class AuditorAgent(BaseAgent):
         try:
             # Create the prompt using LangChain template
             messages = self.prompt_template.format_messages(code_context=code_context)
+            prompt_text = str(messages)
             
             # Log the analysis attempt
             log_experiment(
@@ -208,7 +209,8 @@ class AuditorAgent(BaseAgent):
                 details={
                     "target_dir": target_dir,
                     "files_analyzed": len(code_files),
-                    "input_prompt": str(messages)
+                    "input_prompt": prompt_text,
+                    "output_response": "Analysis started"
                 },
                 status="STARTED"
             )
@@ -228,6 +230,7 @@ class AuditorAgent(BaseAgent):
                 details={
                     "target_dir": target_dir,
                     "files_analyzed": len(code_files),
+                    "input_prompt": prompt_text,
                     "output_response": response_text,
                     "issues_found": len(analysis_result.get("issues", []))
                 },
@@ -250,6 +253,8 @@ class AuditorAgent(BaseAgent):
                 details={
                     "target_dir": target_dir,
                     "files_analyzed": len(code_files),
+                    "input_prompt": code_context[:2000],
+                    "output_response": f"Analysis failed: {str(e)}",
                     "error": str(e),
                     "error_type": type(e).__name__
                 },

@@ -241,10 +241,16 @@ class JudgeAgent(BaseAgent):
         overall_verdict = self._determine_overall_verdict(
             approved_count, rejected_count, needs_revision_count, total_fixes
         )
+        average_score = (
+            sum(j["judgment"].get("overall_score", 0) for j in judgments) / total_fixes
+            if total_fixes > 0 else 0
+        )
         
         return {
             "status": "COMPLETED",
             "overall_verdict": overall_verdict,
+            "verdict": overall_verdict,
+            "overall_score": round(average_score, 2),
             "total_fixes": total_fixes,
             "approved": approved_count,
             "rejected": rejected_count,
@@ -273,6 +279,7 @@ class JudgeAgent(BaseAgent):
         Returns:
             Judgment result dictionary
         """
+        prompt_text = ""
         try:
             # Format the prompt using the template
             messages = self.prompt_template.format_messages(
@@ -285,6 +292,7 @@ class JudgeAgent(BaseAgent):
                 explanation=explanation,
                 additional_context=additional_context
             )
+            prompt_text = str(messages)
             
             # Call LLM through LangChain
             response = self.llm.invoke(messages)
@@ -306,7 +314,7 @@ class JudgeAgent(BaseAgent):
                     "overall_score": judgment["overall_score"],
                     "issues_found": len(judgment.get("issues_found", [])),
                     "blocking_issues": len(judgment.get("blocking_issues", [])),
-                    "input_prompt": str(messages),
+                    "input_prompt": prompt_text,
                     "output_response": response_text
                 },
                 status="SUCCESS"
@@ -339,6 +347,8 @@ class JudgeAgent(BaseAgent):
                 action=ActionType.JUDGE,
                 details={
                     "file": file_path,
+                    "input_prompt": prompt_text or f"Judge fix for {file_path}",
+                    "output_response": f"Failed to generate judgment: {str(e)}",
                     "error": str(e),
                     "error_type": type(e).__name__
                 },

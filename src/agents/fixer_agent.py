@@ -165,6 +165,7 @@ class FixerAgent(BaseAgent):
         results = []
         successful_fixes = 0
         failed_fixes = 0
+        collected_fixes = []
         
         for issue in issues:
             fix_result = self.fix_issue(issue, target_dir)
@@ -175,6 +176,7 @@ class FixerAgent(BaseAgent):
             
             if fix_result.get("status") == "SUCCESS":
                 successful_fixes += 1
+                collected_fixes.extend(fix_result.get("fixes", []))
             else:
                 failed_fixes += 1
         
@@ -183,7 +185,8 @@ class FixerAgent(BaseAgent):
             "total_issues": len(issues),
             "successful_fixes": successful_fixes,
             "failed_fixes": failed_fixes,
-            "results": results
+            "results": results,
+            "fixes": collected_fixes
         }
     
     def apply_fix(self, fix: Dict[str, Any], dry_run: bool = False) -> Dict[str, Any]:
@@ -198,8 +201,8 @@ class FixerAgent(BaseAgent):
             Result of applying the fix
         """
         file_path = fix.get("file")
-        original_code = fix.get("original_code")
-        fixed_code = fix.get("fixed_code")
+        original_code = self._strip_code_fences(fix.get("original_code"))
+        fixed_code = self._strip_code_fences(fix.get("fixed_code"))
         
         if not all([file_path, original_code is not None, fixed_code is not None]):
             return {
@@ -218,13 +221,6 @@ class FixerAgent(BaseAgent):
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             
-            # Verify the original code exists in the file
-            if original_code not in content:
-                return {
-                    "status": "ERROR",
-                    "message": "Original code not found in file - code may have changed"
-                }
-            
             if dry_run:
                 return {
                     "status": "DRY_RUN",
@@ -232,10 +228,46 @@ class FixerAgent(BaseAgent):
                     "file": file_path,
                     "fix": fix
                 }
+
+            # Apply exact-text replacement first, then fallback to line range.
+            applied_via = "exact_match"
+            if original_code and original_code in content:
+                new_content = content.replace(original_code, fixed_code, 1)
+            else:
+                line_start = self._safe_int(fix.get("line_start"))
+                line_end = self._safe_int(fix.get("line_end"))
+                if not line_start or not line_end:
+                    return {
+                        "status": "ERROR",
+                        "message": "Original code not found and no valid line range provided"
+                    }
+
+                lines = content.splitlines(keepends=True)
+                if not lines:
+                    return {
+                        "status": "ERROR",
+                        "message": "Cannot apply line-range fix on empty file"
+                    }
+
+                start_idx = max(0, line_start - 1)
+                end_idx = min(len(lines), line_end)
+                if start_idx >= end_idx:
+                    return {
+                        "status": "ERROR",
+                        "message": f"Invalid line range: {line_start}-{line_end}"
+                    }
+
+                replacement = fixed_code
+                if replacement and not replacement.endswith("\n"):
+                    replacement += "\n"
+
+                new_content = "".join(lines[:start_idx]) + replacement + "".join(lines[end_idx:])
+                applied_via = "line_range"
             
-            # Apply the fix
-            new_content = content.replace(original_code, fixed_code, 1)
-            
+            # Prevent writing syntactically invalid Python.
+            if str(file_path).endswith(".py"):
+                self._validate_python_syntax(new_content, file_path)
+
             # Write back to file
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(new_content)
@@ -247,6 +279,8 @@ class FixerAgent(BaseAgent):
                 action=ActionType.FIX,
                 details={
                     "file": file_path,
+                    "input_prompt": f"Apply fix to {file_path}",
+                    "output_response": f"Fix applied successfully via {applied_via}",
                     "explanation": fix.get("explanation", ""),
                     "confidence": fix.get("confidence", "unknown")
                 },
@@ -255,7 +289,7 @@ class FixerAgent(BaseAgent):
             
             return {
                 "status": "SUCCESS",
-                "message": "Fix applied successfully",
+                "message": f"Fix applied successfully via {applied_via}",
                 "file": file_path
             }
             
@@ -266,6 +300,8 @@ class FixerAgent(BaseAgent):
                 action=ActionType.FIX,
                 details={
                     "file": file_path,
+                    "input_prompt": f"Apply fix to {file_path}",
+                    "output_response": f"Failed to apply fix: {str(e)}",
                     "error": str(e),
                     "error_type": type(e).__name__
                 },
@@ -276,6 +312,39 @@ class FixerAgent(BaseAgent):
                 "status": "ERROR",
                 "message": f"Failed to apply fix: {str(e)}"
             }
+
+    def _strip_code_fences(self, code: Any) -> Any:
+        """
+        Remove markdown code fences if the model wrapped code blocks.
+        """
+        if not isinstance(code, str):
+            return code
+
+        stripped = code.strip()
+        if not stripped.startswith("```"):
+            return code
+
+        lines = stripped.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        return "\n".join(lines)
+
+    def _safe_int(self, value: Any) -> Optional[int]:
+        """
+        Convert arbitrary values to int when possible.
+        """
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _validate_python_syntax(self, code: str, file_path: str) -> None:
+        """
+        Validate Python syntax before writing changes to disk.
+        """
+        compile(code.lstrip("\ufeff"), file_path, "exec")
     
     def _read_file_section(self, file_path: str, line_start: Optional[int], line_end: Optional[int]) -> str:
         """
@@ -314,6 +383,7 @@ class FixerAgent(BaseAgent):
         Returns:
             Fix result dictionary
         """
+        prompt_text = ""
         try:
             # Create the prompt using LangChain template
             messages = self.prompt_template.format_messages(
@@ -326,6 +396,7 @@ class FixerAgent(BaseAgent):
                 line_end=issue.get("line_end", "N/A"),
                 code_content=code_content
             )
+            prompt_text = str(messages)
             
             # Log the fix attempt
             log_experiment(
@@ -335,7 +406,8 @@ class FixerAgent(BaseAgent):
                 details={
                     "file": file_path,
                     "issue": issue.get("description", ""),
-                    "input_prompt": str(messages)
+                    "input_prompt": prompt_text,
+                    "output_response": "Fix generation started"
                 },
                 status="STARTED"
             )
@@ -354,6 +426,8 @@ class FixerAgent(BaseAgent):
                     action=ActionType.FIX,
                     details={
                         "file": file_path,
+                        "input_prompt": prompt_text,
+                        "output_response": response_text[:2000],
                         "error": "No fixes generated",
                         "response": response_text[:500]
                     },
@@ -373,6 +447,7 @@ class FixerAgent(BaseAgent):
                 action=ActionType.FIX,
                 details={
                     "file": file_path,
+                    "input_prompt": prompt_text,
                     "fixes_generated": len(fix_result["fixes"]),
                     "output_response": response_text
                 },
@@ -392,6 +467,8 @@ class FixerAgent(BaseAgent):
                 action=ActionType.FIX,
                 details={
                     "file": file_path,
+                    "input_prompt": prompt_text or f"Generate fix for {file_path}",
+                    "output_response": f"Fix generation failed: {str(e)}",
                     "error": str(e),
                     "error_type": type(e).__name__
                 },

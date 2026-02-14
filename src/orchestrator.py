@@ -148,7 +148,15 @@ class RefactoringOrchestrator:
             print("    1️⃣ Auditor analyzing...")
             state.audit_result = self._run_auditor(auditor, file_path)
             
-            if not state.audit_result or not state.audit_result.get("issues"):
+            if not state.audit_result:
+                print("    ❌ Auditor returned no result - stopping")
+                break
+
+            if state.audit_result.get("error"):
+                print(f"    ❌ Auditor failed: {state.audit_result.get('error')}")
+                break
+
+            if not state.audit_result.get("issues"):
                 print("    ✅ No issues found!")
                 state.completed = True
                 break
@@ -165,13 +173,14 @@ class RefactoringOrchestrator:
                 break
             
             fixes_count = len(state.fix_result.get("fixes", []))
-            print(f"    🔧 Generated {fixes_count} fix(es)")
+            generated_count = state.fix_result.get("generated_fixes", fixes_count)
+            print(f"    🔧 Generated {generated_count} fix(es), applied {fixes_count}")
             
             # Node 3: Judge validates fixes
             print("    3️⃣ Judge evaluating...")
             state.judgment = self._run_judge(judge, file_path, state.audit_result, state.fix_result)
             
-            verdict = state.judgment.get("verdict", "UNKNOWN")
+            verdict = state.judgment.get("verdict") or state.judgment.get("overall_verdict", "UNKNOWN")
             score = state.judgment.get("overall_score", 0)
             print(f"    📊 Verdict: {verdict} (Score: {score}/100)")
             
@@ -224,6 +233,51 @@ class RefactoringOrchestrator:
             target_dir = os.path.dirname(file_path)
             issues = audit_result.get("issues", [])
             result = fixer.fix_issues(issues, target_dir)
+
+            generated_fixes = result.get("fixes", [])
+            applied_fixes = []
+            apply_results = []
+            applied_ranges: Dict[str, List[tuple[int, int]]] = {}
+
+            for fix in generated_fixes:
+                normalized_fix = dict(fix)
+                fix_file = normalized_fix.get("file") or file_path
+                if not os.path.isabs(fix_file):
+                    direct_path = os.path.normpath(fix_file)
+                    nested_path = os.path.normpath(os.path.join(target_dir, fix_file))
+                    fix_file = direct_path if os.path.exists(direct_path) else nested_path
+                normalized_fix["file"] = fix_file
+
+                line_start = self._to_int(normalized_fix.get("line_start"))
+                line_end = self._to_int(normalized_fix.get("line_end"))
+                if line_start is not None and line_end is not None:
+                    ranges = applied_ranges.setdefault(fix_file, [])
+                    overlaps = any(not (line_end < start or line_start > end) for start, end in ranges)
+                    if overlaps:
+                        apply_results.append({
+                            "file": fix_file,
+                            "status": "SKIPPED",
+                            "message": f"Skipped overlapping fix range {line_start}-{line_end}"
+                        })
+                        continue
+
+                apply_result = fixer.apply_fix(normalized_fix, dry_run=False)
+                apply_results.append({
+                    "file": fix_file,
+                    "status": apply_result.get("status"),
+                    "message": apply_result.get("message", "")
+                })
+
+                if apply_result.get("status") == "SUCCESS":
+                    applied_fixes.append(normalized_fix)
+                    if line_start is not None and line_end is not None:
+                        applied_ranges.setdefault(fix_file, []).append((line_start, line_end))
+
+            result["generated_fixes"] = len(generated_fixes)
+            result["applied_fixes"] = len(applied_fixes)
+            result["apply_results"] = apply_results
+            # Only pass successfully applied fixes to Judge
+            result["fixes"] = applied_fixes
             return result
         except Exception as e:
             print(f"    ❌ Fixer error: {str(e)}")
@@ -232,21 +286,33 @@ class RefactoringOrchestrator:
     def _run_judge(self, judge, file_path: str, audit_result: Dict, fix_result: Dict) -> Dict[str, Any]:
         """Execute Judge agent."""
         try:
-            import os
-            target_dir = os.path.dirname(file_path)
             fixes = fix_result.get("fixes", [])
             issues = audit_result.get("issues", [])
-            result = judge.evaluate_fixes(fixes, issues, target_dir)
+            result = judge.evaluate_fixes(fixes, issues)
             return result
         except Exception as e:
             print(f"    ❌ Judge error: {str(e)}")
             return {"verdict": "ERROR", "overall_score": 0, "error": str(e)}
+
+    def _to_int(self, value: Any) -> Optional[int]:
+        """Best-effort int conversion for line numbers."""
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
     
     def _generate_summary(self) -> Dict[str, Any]:
         """Generate summary of all processing results."""
         total = len(self.results)
-        successful = sum(1 for state in self.results.values() 
-                        if state.judgment and state.judgment.get("verdict") == "APPROVED")
+        successful = sum(
+            1
+            for state in self.results.values()
+            if state.judgment
+            and (
+                state.judgment.get("verdict") == "APPROVED"
+                or state.judgment.get("overall_verdict") == "APPROVED"
+            )
+        )
         failed = total - successful
         
         return {
